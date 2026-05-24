@@ -1,0 +1,30 @@
+# Secrets and auth
+agent/auth.json
+agent/**/*.local.*
+agent/*.local.*
+.env
+.env.*
+*.pem
+*.key
+
+# Sessions and runtime state
+agent/sessions/
+agent/logs/
+agent/cache/
+agent/tmp/
+agent/**/sessions/
+agent/**/logs/
+agent/**/cache/
+agent/**/tmp/
+
+# Pi package installs / dependencies
+agent/npm/
+agent/git/
+node_modules/
+**/node_modules/
+
+# Tool/runtime noise
+.DS_Store
+*.log
+*.tmp
+*.swp
