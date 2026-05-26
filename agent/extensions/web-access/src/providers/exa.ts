@@ -1,4 +1,4 @@
-import Exa from "exa-js";
+import { Exa } from "exa-js";
 import type { RegularSearchOptions } from "exa-js";
 
 import type { SearchOptions, SearchProvider, SearchResponse, SearchResult } from "../types.ts";

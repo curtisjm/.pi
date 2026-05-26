@@ -53,7 +53,7 @@ export function registerWebFetchTool(pi: ExtensionAPI, deps: WebFetchToolDeps): 
           directFetcher: deps.getDirectFetcher(),
           firecrawlFetcher: deps.getFirecrawlFetcher(),
           githubProvider: deps.getGitHubProvider(),
-          onProgress: (message) => onUpdate?.({ content: [{ type: "text" as const, text: message }] }),
+          onProgress: (message) => onUpdate?.({ content: [{ type: "text" as const, text: message }], details: {} }),
         });
         pages.push(page);
       }

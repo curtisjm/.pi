@@ -22,14 +22,14 @@ export class WebRouter {
     const fetchMode = options.fetchMode ?? "auto";
     validateFetchModeForUrl(fetchMode, url);
 
-    const githubRoute = parseGitHubUrl(url) ?? undefined;
+    const githubRoute = parseGitHubUrl(url);
 
     if (fetchMode === "github") {
       return {
         kind: "github",
         url,
         fetchMode,
-        githubRoute,
+        githubRoute: githubRoute ?? undefined,
         reason: "fetchMode requested GitHub structured handling",
       };
     }
@@ -57,7 +57,7 @@ export class WebRouter {
         kind: "github",
         url,
         fetchMode,
-        githubRoute,
+        githubRoute: githubRoute ?? undefined,
         reason: "GitHub repo/blob/tree URL should use local clone handling",
       };
     }
@@ -67,7 +67,7 @@ export class WebRouter {
         kind: "github",
         url,
         fetchMode,
-        githubRoute,
+        githubRoute: githubRoute ?? undefined,
         reason: "GitHub issue/PR URL should use structured metadata before scraping",
       };
     }

@@ -26,4 +26,8 @@ This repo tracks the durable parts of my Pi setup: settings, skills, extensions,
 - Karpathy-style LLM wiki memory
 - Local todos vs GitHub Issues vs Linear for task tracking
 - Tmux-based Pi worker delegation
-- Web fetch/search provider
+
+## Implemented extensions
+
+- `agent/extensions/git-interceptor.ts`: protects agent-driven git commands from editor hangs and blocks `--no-verify`.
+- `agent/extensions/web-access/`: focused web search/fetch extension with Exa search, Firecrawl clean scraping, direct static fetches, GitHub clone/API handling, and SQLite response/cache storage.

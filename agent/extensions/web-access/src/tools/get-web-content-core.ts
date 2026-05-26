@@ -56,14 +56,14 @@ export function getStoredWebContent(cache: WebAccessCache, params: GetWebContent
 }
 
 export function selectStoredContent(stored: StoredResponse, params: GetWebContentParams): SelectedStoredContent {
-  const payload = stored.payload as Partial<SearchResponsePayload & WebFetchResponsePayload> & Record<string, unknown>;
+  const payload = isRecord(stored.payload) ? stored.payload : { content: String(stored.payload) };
 
   if (payload.kind === "web_fetch" && Array.isArray(payload.pages)) {
     return selectPageContent(stored.kind, payload.pages as PageContent[], params);
   }
 
   if ((payload.kind === "web_search" || payload.kind === "code_search") && Array.isArray(payload.responses)) {
-    return selectSearchContent(stored.kind, payload as SearchResponsePayload, params);
+    return selectSearchContent(stored.kind, payload as unknown as SearchResponsePayload, params);
   }
 
   const content = typeof payload.content === "string" ? payload.content : JSON.stringify(payload, null, 2);
@@ -172,4 +172,8 @@ function nonNegativeInteger(value: unknown, defaultValue: number): number {
 
 function positiveInteger(value: unknown, defaultValue: number): number {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : defaultValue;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object";
 }
