@@ -1,0 +1,99 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { DirectHttpFetcher } from "../src/providers/direct-http.ts";
+import { WebRouter } from "../src/router.ts";
+import { DirectFetchRejectedError } from "../src/utils/errors.ts";
+import {
+  isDirectFetchContentType,
+  isDirectFetchUrlCandidate,
+  parseGitHubUrl,
+} from "../src/utils/urls.ts";
+
+test("GitHub URL parser classifies repo/blob/tree/issue/pull and rejects non-code pages", () => {
+  assert.deepEqual(parseGitHubUrl("https://github.com/owner/repo"), {
+    kind: "repo",
+    owner: "owner",
+    repo: "repo",
+  });
+
+  const blob = parseGitHubUrl("https://github.com/owner/repo/blob/main/src/index.ts");
+  assert.equal(blob?.kind, "blob");
+  assert.equal(blob?.owner, "owner");
+  assert.equal(blob?.repo, "repo");
+  assert.equal(blob?.ref, "main");
+  assert.equal(blob?.path, "src/index.ts");
+
+  const tree = parseGitHubUrl("https://github.com/owner/repo/tree/develop/packages/pkg");
+  assert.equal(tree?.kind, "tree");
+  assert.equal(tree?.ref, "develop");
+  assert.equal(tree?.path, "packages/pkg");
+
+  assert.deepEqual(parseGitHubUrl("https://github.com/owner/repo/issues/14"), {
+    kind: "issue",
+    owner: "owner",
+    repo: "repo",
+    number: 14,
+  });
+  assert.deepEqual(parseGitHubUrl("https://github.com/owner/repo/pull/7"), {
+    kind: "pull",
+    owner: "owner",
+    repo: "repo",
+    number: 7,
+  });
+
+  assert.equal(parseGitHubUrl("https://github.com/owner/repo/actions"), null);
+  assert.equal(parseGitHubUrl("https://github.com/owner/repo/blob/main/../secret"), null);
+});
+
+test("direct fetch eligibility is conservative", () => {
+  assert.equal(isDirectFetchUrlCandidate("https://raw.githubusercontent.com/o/r/main/README.md"), true);
+  assert.equal(isDirectFetchUrlCandidate("https://example.com/llms.txt"), true);
+  assert.equal(isDirectFetchUrlCandidate("https://example.com/data.json"), true);
+  assert.equal(isDirectFetchUrlCandidate("https://example.com/blog/post"), false);
+
+  assert.equal(isDirectFetchContentType("text/plain; charset=utf-8"), true);
+  assert.equal(isDirectFetchContentType("application/json"), true);
+  assert.equal(isDirectFetchContentType("text/html; charset=utf-8"), false);
+});
+
+test("router chooses GitHub/direct/Firecrawl routes", () => {
+  const router = new WebRouter();
+  assert.equal(router.route("https://github.com/o/r/blob/main/README.md").kind, "github");
+  assert.equal(router.route("https://github.com/o/r/issues/1").kind, "github");
+  assert.equal(router.route("https://raw.githubusercontent.com/o/r/main/README.md").kind, "direct-http");
+  assert.equal(router.route("https://example.com/blog/post").kind, "firecrawl");
+  assert.equal(router.route("https://example.com/blog/post", { fetchMode: "direct" }).kind, "direct-http");
+  assert.throws(() => router.route("https://example.com", { fetchMode: "github" }), /only supports GitHub/);
+});
+
+test("direct fetch returns static text in auto mode", async () => {
+  const fetcher = new DirectHttpFetcher({
+    now: () => new Date("2026-01-01T00:00:00.000Z"),
+    fetchImpl: async () =>
+      new Response("# Hello", {
+        status: 200,
+        headers: { "content-type": "text/markdown" },
+      }),
+  });
+
+  const page = await fetcher.fetchPage("https://example.com/llms.txt");
+  assert.equal(page.source, "direct-http");
+  assert.equal(page.markdown, "# Hello");
+  assert.equal(page.title, "llms.txt");
+});
+
+test("direct fetch rejects HTML in auto mode without exposing raw HTML", async () => {
+  const fetcher = new DirectHttpFetcher({
+    fetchImpl: async () =>
+      new Response("<html><body>messy</body></html>", {
+        status: 200,
+        headers: { "content-type": "text/html" },
+      }),
+  });
+
+  await assert.rejects(
+    () => fetcher.fetchPage("https://example.com/page", { fetchMode: "auto" }),
+    (error) => error instanceof DirectFetchRejectedError && !String(error.message).includes("<html>"),
+  );
+});
