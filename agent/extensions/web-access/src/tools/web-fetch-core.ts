@@ -57,13 +57,13 @@ export async function fetchUrlWithRouting(url: string, options: FetchOptions, de
     } catch (error) {
       if (fetchMode === "auto" && error instanceof DirectFetchRejectedError) {
         deps.onProgress?.("Falling back to Firecrawl for clean markdown...");
-        page = await deps.firecrawlFetcher.fetchPage(normalizedUrl, options);
+        page = await deps.firecrawlFetcher.fetchPage(normalizedUrl, { ...options, fetchMode });
       } else {
         throw error;
       }
     }
   } else {
-    page = await deps.firecrawlFetcher.fetchPage(normalizedUrl, options);
+    page = await deps.firecrawlFetcher.fetchPage(normalizedUrl, { ...options, fetchMode });
   }
 
   deps.cache.setPage({

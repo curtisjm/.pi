@@ -41,6 +41,36 @@ test("getStoredWebContent returns capped page chunks with exact follow-up calls"
   }
 });
 
+test("getStoredWebContent treats fractional maxChars below 1 as default", () => {
+  const { cache, cleanup } = makeTempCache();
+  try {
+    const stored = cache.createResponse<WebFetchResponsePayload>(
+      "web_fetch",
+      {
+        kind: "web_fetch",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        pages: [
+          {
+            url: "https://example.com/a",
+            title: "A",
+            markdown: "abcdef",
+            source: "firecrawl",
+            fetchedAt: "2026-01-01T00:00:00.000Z",
+            contentHash: "hash",
+          },
+        ],
+      },
+      24,
+    );
+
+    const text = getStoredWebContent(cache, { responseId: stored.responseId, maxChars: 0.5 });
+    assert.match(text, /chars 0-6 of 6/);
+    assert.doesNotMatch(text, /chars 0-0 of 6/);
+  } finally {
+    cleanup();
+  }
+});
+
 test("getStoredWebContent full true returns all selected content", () => {
   const { cache, cleanup } = makeTempCache();
   try {

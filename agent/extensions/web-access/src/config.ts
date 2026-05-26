@@ -74,7 +74,7 @@ export function checkExecutable(name: string): ExecutableStatus {
     timeout: 1_000,
   });
 
-  return result.error || result.status === null ? "unavailable" : "available";
+  return !result.error && typeof result.status === "number" && result.status === 0 ? "available" : "unavailable";
 }
 
 export function formatWebAccessDiagnostics(config: WebAccessConfig = loadWebAccessConfig()): string {

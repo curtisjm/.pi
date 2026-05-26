@@ -68,12 +68,13 @@ export default function webAccessExtension(pi: ExtensionAPI) {
   pi.on("session_shutdown", () => {
     cache?.close();
     cache = undefined;
+    githubProvider = undefined;
   });
 
   pi.registerCommand("web-access", {
     description: "Show web access diagnostics without API calls or secret values",
     handler: async (_args, ctx) => {
-      const diagnostics = formatWebAccessDiagnostics(loadWebAccessConfig());
+      const diagnostics = formatWebAccessDiagnostics(startupConfig);
       if (ctx.hasUI) {
         ctx.ui.notify(diagnostics, "info");
       } else {

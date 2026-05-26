@@ -70,8 +70,10 @@ test("fetchUrlWithRouting falls back from rejected direct HTML to Firecrawl with
       throw new DirectFetchRejectedError("Direct fetch returned HTML in auto mode");
     },
   };
+  let observedFetchMode: string | undefined;
   const firecrawlFetcher: PageFetcher = {
-    async fetchPage(url) {
+    async fetchPage(url, options) {
+      observedFetchMode = options?.fetchMode;
       return page(url, "firecrawl", "# Clean markdown");
     },
   };
@@ -80,7 +82,26 @@ test("fetchUrlWithRouting falls back from rejected direct HTML to Firecrawl with
     const result = await fetchUrlWithRouting("https://example.com/data.json", {}, makeDeps(cache, { directFetcher, firecrawlFetcher, onProgress: (m) => progress.push(m) }));
     assert.equal(result.source, "firecrawl");
     assert.equal(result.markdown.includes("<html>"), false);
+    assert.equal(observedFetchMode, "auto");
     assert.deepEqual(progress, ["Trying direct fetch...", "Falling back to Firecrawl for clean markdown..."]);
+  } finally {
+    cleanup();
+  }
+});
+
+test("fetchUrlWithRouting passes resolved fetchMode to direct Firecrawl route", async () => {
+  const { cache, cleanup } = makeTempCache();
+  let observedFetchMode: string | undefined;
+  const firecrawlFetcher: PageFetcher = {
+    async fetchPage(url, options) {
+      observedFetchMode = options?.fetchMode;
+      return page(url, "firecrawl", "# Clean markdown");
+    },
+  };
+
+  try {
+    await fetchUrlWithRouting("https://example.com/page", {}, makeDeps(cache, { firecrawlFetcher }));
+    assert.equal(observedFetchMode, "auto");
   } finally {
     cleanup();
   }

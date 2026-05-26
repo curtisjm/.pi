@@ -171,7 +171,9 @@ function nonNegativeInteger(value: unknown, defaultValue: number): number {
 }
 
 function positiveInteger(value: unknown, defaultValue: number): number {
-  return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : defaultValue;
+  if (typeof value !== "number" || !Number.isFinite(value)) return defaultValue;
+  const n = Math.floor(value);
+  return n >= 1 ? n : defaultValue;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
