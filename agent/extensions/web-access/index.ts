@@ -1,5 +1,4 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 
 import { WebAccessCache } from "./src/cache.ts";
@@ -8,15 +7,24 @@ import {
   formatWebAccessDiagnostics,
   loadWebAccessConfig,
 } from "./src/config.ts";
+import { DirectHttpFetcher } from "./src/providers/direct-http.ts";
 import { ExaSearchProvider } from "./src/providers/exa.ts";
+import { FirecrawlFetcher } from "./src/providers/firecrawl.ts";
+import { GitHubContentProvider } from "./src/providers/github.ts";
+import { WebRouter } from "./src/router.ts";
 import { registerCodeSearchTool } from "./src/tools/code-search.ts";
+import { registerWebFetchTool } from "./src/tools/web-fetch.ts";
 import { registerWebSearchTool } from "./src/tools/web-search.ts";
-import type { SearchProvider } from "./src/types.ts";
+import type { GitHubProvider, PageFetcher, SearchProvider } from "./src/types.ts";
 
 export default function webAccessExtension(pi: ExtensionAPI) {
   const startupConfig = loadWebAccessConfig();
   let cache: WebAccessCache | undefined;
   let searchProvider: SearchProvider | undefined;
+  let router: WebRouter | undefined;
+  let directFetcher: PageFetcher | undefined;
+  let firecrawlFetcher: PageFetcher | undefined;
+  let githubProvider: GitHubProvider | undefined;
 
   const getCache = () => {
     cache ??= new WebAccessCache();
@@ -25,6 +33,26 @@ export default function webAccessExtension(pi: ExtensionAPI) {
   const getSearchProvider = () => {
     searchProvider ??= new ExaSearchProvider();
     return searchProvider;
+  };
+  const getRouter = () => {
+    router ??= new WebRouter();
+    return router;
+  };
+  const getDirectFetcher = () => {
+    directFetcher ??= new DirectHttpFetcher();
+    return directFetcher;
+  };
+  const getFirecrawlFetcher = () => {
+    firecrawlFetcher ??= new FirecrawlFetcher();
+    return firecrawlFetcher;
+  };
+  const getGitHubProvider = () => {
+    githubProvider ??= new GitHubContentProvider({
+      cache: getCache(),
+      config: startupConfig,
+      firecrawlFallback: getFirecrawlFetcher(),
+    });
+    return githubProvider;
   };
 
   pi.on("session_start", (_event, ctx) => {
@@ -57,32 +85,18 @@ export default function webAccessExtension(pi: ExtensionAPI) {
 
   registerWebSearchTool(pi, { getCache, getSearchProvider, config: startupConfig });
   registerCodeSearchTool(pi, { getCache, getSearchProvider, config: startupConfig });
+  registerWebFetchTool(pi, {
+    getCache,
+    getRouter,
+    getDirectFetcher,
+    getFirecrawlFetcher,
+    getGitHubProvider,
+    config: startupConfig,
+  });
   registerRemainingPlaceholderTools(pi);
 }
 
 function registerRemainingPlaceholderTools(pi: ExtensionAPI) {
-  pi.registerTool({
-    name: "web_fetch",
-    label: "Web Fetch",
-    description: "Fetch URL content cleanly with capped output. Placeholder until Phase 7 is implemented.",
-    promptSnippet: "Fetch URL content cleanly; clones GitHub code URLs locally and uses Firecrawl for normal webpages.",
-    promptGuidelines: [
-      "Use web_fetch to read selected URLs; for GitHub repository/blob/tree URLs, web_fetch provides a local clone/path when possible.",
-    ],
-    parameters: Type.Object({
-      url: Type.Optional(Type.String({ description: "Single URL to fetch" })),
-      urls: Type.Optional(Type.Array(Type.String(), { maxItems: 5, description: "Multiple URLs to fetch, maximum 5" })),
-      fetchMode: Type.Optional(StringEnum(["auto", "direct", "firecrawl", "github"] as const)),
-      forceRefresh: Type.Optional(Type.Boolean()),
-      onlyMainContent: Type.Optional(Type.Boolean()),
-      waitForMs: Type.Optional(Type.Number({ minimum: 0 })),
-      timeoutMs: Type.Optional(Type.Number({ minimum: 1, default: 30_000 })),
-    }),
-    async execute() {
-      return notImplementedResult("web_fetch", 7);
-    },
-  });
-
   pi.registerTool({
     name: "get_web_content",
     label: "Get Web Content",
@@ -103,22 +117,15 @@ function registerRemainingPlaceholderTools(pi: ExtensionAPI) {
       full: Type.Optional(Type.Boolean()),
     }),
     async execute() {
-      return notImplementedResult("get_web_content", 8);
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: "get_web_content is registered but not implemented yet. Phase 8 will add response retrieval behavior. No provider API calls were made.",
+          },
+        ],
+        details: { implemented: false, plannedPhase: 8 },
+      };
     },
   });
-}
-
-function notImplementedResult(toolName: string, phase: number) {
-  return {
-    content: [
-      {
-        type: "text" as const,
-        text: `${toolName} is registered but not implemented yet. Phase ${phase} will add execution behavior. No provider API calls were made.`,
-      },
-    ],
-    details: {
-      implemented: false,
-      plannedPhase: phase,
-    },
-  };
 }
