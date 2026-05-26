@@ -2,14 +2,30 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 
+import { WebAccessCache } from "./src/cache.ts";
 import {
   formatMissingProviderWarning,
   formatWebAccessDiagnostics,
   loadWebAccessConfig,
 } from "./src/config.ts";
+import { ExaSearchProvider } from "./src/providers/exa.ts";
+import { registerCodeSearchTool } from "./src/tools/code-search.ts";
+import { registerWebSearchTool } from "./src/tools/web-search.ts";
+import type { SearchProvider } from "./src/types.ts";
 
 export default function webAccessExtension(pi: ExtensionAPI) {
   const startupConfig = loadWebAccessConfig();
+  let cache: WebAccessCache | undefined;
+  let searchProvider: SearchProvider | undefined;
+
+  const getCache = () => {
+    cache ??= new WebAccessCache();
+    return cache;
+  };
+  const getSearchProvider = () => {
+    searchProvider ??= new ExaSearchProvider();
+    return searchProvider;
+  };
 
   pi.on("session_start", (_event, ctx) => {
     const warning = formatMissingProviderWarning(startupConfig);
@@ -20,6 +36,11 @@ export default function webAccessExtension(pi: ExtensionAPI) {
     } else {
       console.warn(warning);
     }
+  });
+
+  pi.on("session_shutdown", () => {
+    cache?.close();
+    cache = undefined;
   });
 
   pi.registerCommand("web-access", {
@@ -34,58 +55,12 @@ export default function webAccessExtension(pi: ExtensionAPI) {
     },
   });
 
-  registerPlaceholderTools(pi);
+  registerWebSearchTool(pi, { getCache, getSearchProvider, config: startupConfig });
+  registerCodeSearchTool(pi, { getCache, getSearchProvider, config: startupConfig });
+  registerRemainingPlaceholderTools(pi);
 }
 
-function registerPlaceholderTools(pi: ExtensionAPI) {
-  pi.registerTool({
-    name: "web_search",
-    label: "Web Search",
-    description: "Search the web with Exa for compact source discovery. Placeholder until Phase 5 is implemented.",
-    promptSnippet: "Search the web with Exa for compact source discovery; use web_fetch to read selected sources fully.",
-    promptGuidelines: [
-      "Use web_search for discovering relevant web sources; do not use it when you already have a URL to read.",
-    ],
-    parameters: Type.Object({
-      query: Type.Optional(Type.String({ description: "Single search query" })),
-      queries: Type.Optional(
-        Type.Array(Type.String(), {
-          maxItems: 4,
-          description: "Multiple search queries, maximum 4",
-        }),
-      ),
-      maxResults: Type.Optional(Type.Number({ minimum: 1, maximum: 10, description: "Default 5, maximum 10" })),
-      includeDomains: Type.Optional(Type.Array(Type.String())),
-      excludeDomains: Type.Optional(Type.Array(Type.String())),
-      recency: Type.Optional(StringEnum(["day", "week", "month", "year"] as const)),
-      forceRefresh: Type.Optional(Type.Boolean()),
-    }),
-    async execute() {
-      return notImplementedResult("web_search", 5);
-    },
-  });
-
-  pi.registerTool({
-    name: "code_search",
-    label: "Code Search",
-    description: "Search programming docs, APIs, examples, GitHub issues, and source references. Placeholder until Phase 5 is implemented.",
-    promptSnippet: "Search for programming docs, APIs, examples, GitHub issues, and source references with compact capped output.",
-    promptGuidelines: [
-      "Use code_search for programming/library/API questions before implementing against unfamiliar APIs.",
-    ],
-    parameters: Type.Object({
-      query: Type.String({ description: "Single code/docs/API/examples search query" }),
-      maxResults: Type.Optional(Type.Number({ minimum: 1, maximum: 10, description: "Default 8, maximum 10" })),
-      maxCharacters: Type.Optional(
-        Type.Number({ minimum: 1, maximum: 30_000, description: "Default 12000, maximum 30000" }),
-      ),
-      forceRefresh: Type.Optional(Type.Boolean()),
-    }),
-    async execute() {
-      return notImplementedResult("code_search", 5);
-    },
-  });
-
+function registerRemainingPlaceholderTools(pi: ExtensionAPI) {
   pi.registerTool({
     name: "web_fetch",
     label: "Web Fetch",
@@ -96,12 +71,7 @@ function registerPlaceholderTools(pi: ExtensionAPI) {
     ],
     parameters: Type.Object({
       url: Type.Optional(Type.String({ description: "Single URL to fetch" })),
-      urls: Type.Optional(
-        Type.Array(Type.String(), {
-          maxItems: 5,
-          description: "Multiple URLs to fetch, maximum 5",
-        }),
-      ),
+      urls: Type.Optional(Type.Array(Type.String(), { maxItems: 5, description: "Multiple URLs to fetch, maximum 5" })),
       fetchMode: Type.Optional(StringEnum(["auto", "direct", "firecrawl", "github"] as const)),
       forceRefresh: Type.Optional(Type.Boolean()),
       onlyMainContent: Type.Optional(Type.Boolean()),
@@ -143,7 +113,7 @@ function notImplementedResult(toolName: string, phase: number) {
     content: [
       {
         type: "text" as const,
-        text: `${toolName} is registered but not implemented yet. This is the Phase 2 skeleton; Phase ${phase} will add execution behavior. No provider API calls were made.`,
+        text: `${toolName} is registered but not implemented yet. Phase ${phase} will add execution behavior. No provider API calls were made.`,
       },
     ],
     details: {
