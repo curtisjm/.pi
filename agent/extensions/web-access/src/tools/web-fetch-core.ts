@@ -49,21 +49,21 @@ export async function fetchUrlWithRouting(url: string, options: FetchOptions, de
   let page: PageContent;
 
   if (route.kind === "github") {
-    page = await deps.githubProvider.fetchGitHub(normalizedUrl, options);
+    page = await deps.githubProvider.fetchGitHub(route.url, options);
   } else if (route.kind === "direct-http") {
     try {
       deps.onProgress?.("Trying direct fetch...");
-      page = await deps.directFetcher.fetchPage(normalizedUrl, { ...options, fetchMode });
+      page = await deps.directFetcher.fetchPage(route.url, { ...options, fetchMode });
     } catch (error) {
       if (fetchMode === "auto" && error instanceof DirectFetchRejectedError) {
         deps.onProgress?.("Falling back to Firecrawl for clean markdown...");
-        page = await deps.firecrawlFetcher.fetchPage(normalizedUrl, { ...options, fetchMode });
+        page = await deps.firecrawlFetcher.fetchPage(route.url, { ...options, fetchMode });
       } else {
         throw error;
       }
     }
   } else {
-    page = await deps.firecrawlFetcher.fetchPage(normalizedUrl, { ...options, fetchMode });
+    page = await deps.firecrawlFetcher.fetchPage(route.url, { ...options, fetchMode });
   }
 
   deps.cache.setPage({

@@ -62,6 +62,35 @@ test("fetchUrlWithRouting uses direct fetch cache and avoids repeated provider c
   }
 });
 
+test("fetchUrlWithRouting routes GitHub Gist pages to raw direct content", async () => {
+  const { cache, cleanup } = makeTempCache();
+  let observedUrl: string | undefined;
+  const directFetcher: PageFetcher = {
+    async fetchPage(url) {
+      observedUrl = url;
+      return page(url, "direct-http", "# Gist raw markdown");
+    },
+  };
+  const firecrawlFetcher: PageFetcher = {
+    async fetchPage() {
+      throw new Error("Firecrawl should not be used for gist pages in auto mode");
+    },
+  };
+
+  try {
+    const result = await fetchUrlWithRouting(
+      "https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f",
+      {},
+      makeDeps(cache, { directFetcher, firecrawlFetcher }),
+    );
+    assert.equal(observedUrl, "https://gist.githubusercontent.com/karpathy/442a6bf555914893e9891c11519de94f/raw");
+    assert.equal(result.source, "direct-http");
+    assert.equal(result.markdown, "# Gist raw markdown");
+  } finally {
+    cleanup();
+  }
+});
+
 test("fetchUrlWithRouting falls back from rejected direct HTML to Firecrawl without exposing HTML", async () => {
   const { cache, cleanup } = makeTempCache();
   const progress: string[] = [];

@@ -3,6 +3,7 @@ import {
   isDirectFetchUrlCandidate,
   isGitHubCodeRoute,
   isGitHubIssueOrPullRoute,
+  parseGitHubGistUrl,
   parseGitHubUrl,
   validateFetchModeForUrl,
 } from "./utils/urls.ts";
@@ -23,6 +24,7 @@ export class WebRouter {
     validateFetchModeForUrl(fetchMode, url);
 
     const githubRoute = parseGitHubUrl(url);
+    const gistRoute = parseGitHubGistUrl(url);
 
     if (fetchMode === "github") {
       return {
@@ -37,9 +39,9 @@ export class WebRouter {
     if (fetchMode === "direct") {
       return {
         kind: "direct-http",
-        url,
+        url: gistRoute?.rawUrl ?? url,
         fetchMode,
-        reason: "fetchMode requested direct HTTP",
+        reason: gistRoute ? "fetchMode requested direct raw GitHub Gist content" : "fetchMode requested direct HTTP",
       };
     }
 
@@ -49,6 +51,15 @@ export class WebRouter {
         url,
         fetchMode,
         reason: "fetchMode requested Firecrawl",
+      };
+    }
+
+    if (gistRoute) {
+      return {
+        kind: "direct-http",
+        url: gistRoute.rawUrl,
+        fetchMode,
+        reason: "GitHub Gist URL should use raw content instead of scraped GitHub chrome",
       };
     }
 

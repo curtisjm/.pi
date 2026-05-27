@@ -8,6 +8,7 @@ import {
   isDirectFetchContentType,
   isDirectFetchUrlCandidate,
   normalizeUrl,
+  parseGitHubGistUrl,
   parseGitHubUrl,
   type ResolveHostname,
   assertPublicHttpUrl,
@@ -51,6 +52,25 @@ test("GitHub URL parser classifies repo/blob/tree/issue/pull and rejects non-cod
   assert.equal(parseGitHubUrl("https://github.com/owner/repo/blob/main/../secret"), null);
 });
 
+test("GitHub Gist parser maps gist pages to raw content URLs", () => {
+  assert.deepEqual(parseGitHubGistUrl("https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f"), {
+    owner: "karpathy",
+    gistId: "442a6bf555914893e9891c11519de94f",
+    rawUrl: "https://gist.githubusercontent.com/karpathy/442a6bf555914893e9891c11519de94f/raw",
+    path: undefined,
+  });
+
+  assert.deepEqual(parseGitHubGistUrl("https://gist.github.com/owner/abcdef/raw/path with spaces.md"), {
+    owner: "owner",
+    gistId: "abcdef",
+    rawUrl: "https://gist.githubusercontent.com/owner/abcdef/raw/path%20with%20spaces.md",
+    path: "path with spaces.md",
+  });
+
+  assert.equal(parseGitHubGistUrl("https://gist.github.com/owner/not-a-gist-id"), null);
+  assert.equal(parseGitHubGistUrl("https://gist.github.com/owner/abcdef/raw/../secret"), null);
+});
+
 test("normalizeUrl blocks private and localhost targets", () => {
   assert.throws(() => normalizeUrl("http://localhost/"), /Blocked URL/);
   assert.throws(() => normalizeUrl("http://service.local/"), /Blocked URL/);
@@ -79,6 +99,7 @@ test("assertPublicHttpUrl rejects hostnames that resolve to private addresses", 
 
 test("direct fetch eligibility is conservative", () => {
   assert.equal(isDirectFetchUrlCandidate("https://raw.githubusercontent.com/o/r/main/README.md"), true);
+  assert.equal(isDirectFetchUrlCandidate("https://gist.githubusercontent.com/o/abcdef/raw"), true);
   assert.equal(isDirectFetchUrlCandidate("https://example.com/llms.txt"), true);
   assert.equal(isDirectFetchUrlCandidate("https://example.com/data.json"), true);
   assert.equal(isDirectFetchUrlCandidate("https://example.com/blog/post"), false);
@@ -93,6 +114,9 @@ test("router chooses GitHub/direct/Firecrawl routes", () => {
   assert.equal(router.route("https://github.com/o/r/blob/main/README.md").kind, "github");
   assert.equal(router.route("https://github.com/o/r/issues/1").kind, "github");
   assert.equal(router.route("https://raw.githubusercontent.com/o/r/main/README.md").kind, "direct-http");
+  const gistRoute = router.route("https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f");
+  assert.equal(gistRoute.kind, "direct-http");
+  assert.equal(gistRoute.url, "https://gist.githubusercontent.com/karpathy/442a6bf555914893e9891c11519de94f/raw");
   assert.equal(router.route("https://example.com/blog/post").kind, "firecrawl");
   assert.equal(router.route("https://example.com/blog/post", { fetchMode: "direct" }).kind, "direct-http");
   assert.throws(() => router.route("https://example.com", { fetchMode: "github" }), /only supports GitHub/);

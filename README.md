@@ -51,6 +51,7 @@ Design decisions:
 - Search/fetch results are cached in SQLite at `agent/cache/web-access/cache.sqlite` and full results are stored behind response IDs.
 - Tool output is context-clean by default: search is compact, fetch output is capped/summarized, and uncapped full content requires an explicit `get_web_content({ full: true })` call.
 - Normal webpages route to Firecrawl for clean markdown; cheap/static/agent-friendly sources can use direct HTTP.
+- GitHub Gist pages route to raw gist content to avoid noisy scraped GitHub chrome.
 - GitHub repo/tree/blob URLs clone locally; GitHub issue/PR URLs prefer structured `gh`/REST metadata before any scraping fallback.
 - Secrets belong in `agent/.env`; only `agent/.env.example` is committed.
 

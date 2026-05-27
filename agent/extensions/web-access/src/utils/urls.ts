@@ -4,7 +4,9 @@ import { isIP } from "node:net";
 import type { FetchMode, GitHubRoute } from "../types.ts";
 
 const GITHUB_HOSTS = new Set(["github.com", "www.github.com"]);
+const GIST_HOSTS = new Set(["gist.github.com", "www.gist.github.com"]);
 const RAW_GITHUB_HOST = "raw.githubusercontent.com";
+const RAW_GIST_HOST = "gist.githubusercontent.com";
 const COMMON_NOISY_DIRS = new Set([".git", "node_modules", "dist", "build", ".next", ".venv", "target"]);
 
 export interface ParsedUrl {
@@ -21,6 +23,13 @@ export type ResolveHostname = (hostname: string) => Promise<ResolvedAddress[]>;
 
 export interface GitHubRouteWithCandidates extends GitHubRoute {
   candidateSplits?: Array<{ ref: string; path?: string }>;
+}
+
+export interface GitHubGistRoute {
+  owner: string;
+  gistId: string;
+  rawUrl: string;
+  path?: string;
 }
 
 export function parseHttpUrl(input: string): ParsedUrl {
@@ -128,6 +137,37 @@ export function isGitHubIssueOrPullRoute(route: GitHubRoute | null): boolean {
   return route?.kind === "issue" || route?.kind === "pull";
 }
 
+export function parseGitHubGistUrl(input: string): GitHubGistRoute | null {
+  if (/(?:^|\/|%2f)\.\.?(?:\/|$|%2f)/i.test(input)) return null;
+
+  let url: URL;
+  try {
+    url = new URL(input);
+  } catch {
+    return null;
+  }
+
+  if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+
+  const host = url.hostname.toLowerCase();
+  const segments = url.pathname.split("/").filter(Boolean).map(safeDecodePathSegment);
+  if (segments.length < 2) return null;
+
+  const [owner, gistId, area, ...rest] = segments;
+  if (!owner || !gistId || !isSafeGitHubName(owner) || !isSafeGistId(gistId)) return null;
+
+  if (host === RAW_GIST_HOST) {
+    if (area !== "raw" || rest.some((segment) => !isSafeGitHubPathSegment(segment))) return null;
+    return { owner, gistId, rawUrl: url.toString(), path: safeJoinGitHubPath(rest) };
+  }
+
+  if (!GIST_HOSTS.has(host)) return null;
+  if (area && area !== "raw") return null;
+  if (rest.some((segment) => !isSafeGitHubPathSegment(segment))) return null;
+
+  return { owner, gistId, rawUrl: buildRawGistUrl(owner, gistId, rest), path: safeJoinGitHubPath(rest) };
+}
+
 export function isDirectFetchUrlCandidate(input: string): boolean {
   let url: URL;
   try {
@@ -139,8 +179,9 @@ export function isDirectFetchUrlCandidate(input: string): boolean {
   const host = url.hostname.toLowerCase();
   const path = url.pathname.toLowerCase();
 
-  if (host === RAW_GITHUB_HOST) return true;
+  if (host === RAW_GITHUB_HOST || host === RAW_GIST_HOST) return true;
   if (GITHUB_HOSTS.has(host) && path.includes("/raw/")) return true;
+  if (GIST_HOSTS.has(host) && path.includes("/raw")) return true;
   if (path.endsWith("/llms.txt") || path.endsWith("/llms-full.txt") || path.endsWith("/llms-small.txt")) return true;
   if (looksLikeStaticTextAsset(path)) return true;
 
@@ -219,6 +260,10 @@ function isCommonRefName(ref: string): boolean {
   return /^(main|master|develop|development|dev|trunk|HEAD|v?\d+(?:\.\d+){0,3})$/i.test(ref);
 }
 
+function buildRawGistUrl(owner: string, gistId: string, pathParts: string[]): string {
+  return `https://${RAW_GIST_HOST}/${[owner, gistId, "raw", ...pathParts].map(encodeURIComponent).join("/")}`;
+}
+
 function looksLikeStaticTextAsset(path: string): boolean {
   return /\.(txt|md|mdx|json|jsonl|ndjson|xml|yaml|yml|toml|ini|csv|tsv|js|mjs|cjs|ts|tsx|jsx|css|scss|less|rs|go|py|rb|java|kt|kts|c|cc|cpp|h|hpp|cs|php|swift|sh|bash|zsh|fish|sql|graphql|gql|proto|dockerfile)$/i.test(
     path,
@@ -235,6 +280,10 @@ function safeDecodePathSegment(segment: string): string {
 
 function isSafeGitHubName(value: string): boolean {
   return /^[A-Za-z0-9_.-]+$/.test(value) && value !== "." && value !== "..";
+}
+
+function isSafeGistId(value: string): boolean {
+  return /^[A-Fa-f0-9]+$/.test(value);
 }
 
 function isSafeGitHubPathSegment(value: string): boolean {
