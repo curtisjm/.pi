@@ -13,6 +13,7 @@ agent/sessions/
 agent/logs/
 agent/cache/
 agent/tmp/
+pi-acp/
 agent/**/sessions/
 agent/**/logs/
 agent/**/cache/
