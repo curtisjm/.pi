@@ -6,6 +6,8 @@ import {
   isLikelyHtml,
   normalizeUrl,
   shouldTryDirectFetch,
+  assertPublicHttpUrl,
+  type ResolveHostname,
 } from "../utils/urls.ts";
 import { DirectFetchRejectedError } from "../utils/errors.ts";
 
@@ -13,20 +15,24 @@ export const DIRECT_HTTP_MAX_BYTES = 2 * 1024 * 1024;
 
 export interface DirectHttpFetcherOptions {
   fetchImpl?: typeof fetch;
+  resolveHostname?: ResolveHostname;
   now?: () => Date;
 }
 
 export class DirectHttpFetcher {
   private readonly fetchImpl: typeof fetch;
+  private readonly resolveHostname?: ResolveHostname;
   private readonly now: () => Date;
 
   constructor(options: DirectHttpFetcherOptions = {}) {
     this.fetchImpl = options.fetchImpl ?? fetch;
+    this.resolveHostname = options.resolveHostname;
     this.now = options.now ?? (() => new Date());
   }
 
   async fetchPage(url: string, options: FetchOptions = {}): Promise<PageContent> {
     const normalizedUrl = normalizeUrl(url);
+    await assertPublicHttpUrl(normalizedUrl, this.resolveHostname);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 30_000);
 

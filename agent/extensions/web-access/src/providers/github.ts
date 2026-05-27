@@ -11,7 +11,7 @@ import type { WebAccessCache } from "../cache.ts";
 import { checkExecutable } from "../config.ts";
 import { conciseError } from "../utils/errors.ts";
 import { contentHash, makeCacheKey } from "../utils/hash.ts";
-import { isNoisyRepoPath, parseGitHubUrl } from "../utils/urls.ts";
+import { assertPublicHttpUrl, isNoisyRepoPath, parseGitHubUrl, type ResolveHostname } from "../utils/urls.ts";
 
 export { parseGitHubUrl } from "../utils/urls.ts";
 
@@ -36,6 +36,7 @@ export interface GitHubContentProviderOptions {
   cacheRoot?: string;
   execFileImpl?: ExecFileImpl;
   fetchImpl?: typeof fetch;
+  resolveHostname?: ResolveHostname;
   firecrawlFallback?: PageFetcher;
   now?: () => Date;
 }
@@ -66,6 +67,7 @@ export class GitHubContentProvider implements GitHubProvider {
   private readonly cacheRoot: string;
   private readonly execFileImpl: ExecFileImpl;
   private readonly fetchImpl: typeof fetch;
+  private readonly resolveHostname?: ResolveHostname;
   private readonly firecrawlFallback?: PageFetcher;
   private readonly now: () => Date;
 
@@ -80,6 +82,7 @@ export class GitHubContentProvider implements GitHubProvider {
     this.cacheRoot = options.cacheRoot ?? DEFAULT_GITHUB_CACHE_ROOT;
     this.execFileImpl = options.execFileImpl ?? defaultExecFile;
     this.fetchImpl = options.fetchImpl ?? fetch;
+    this.resolveHostname = options.resolveHostname;
     this.firecrawlFallback = options.firecrawlFallback;
     this.now = options.now ?? (() => new Date());
   }
@@ -140,6 +143,7 @@ export class GitHubContentProvider implements GitHubProvider {
         ref,
         target,
         execFileImpl: this.execFileImpl,
+        resolveHostname: this.resolveHostname,
       });
     }
 
@@ -184,6 +188,7 @@ export class GitHubContentProvider implements GitHubProvider {
   }
 
   private async fetchIssueOrPullViaGh(url: string, route: GitHubRoute): Promise<PageContent | null> {
+    await assertPublicHttpUrl(url, this.resolveHostname);
     if (checkExecutable("gh") !== "available") return null;
     const repoArg = `${route.owner}/${route.repo}`;
     const number = String(route.number);
@@ -215,14 +220,14 @@ export class GitHubContentProvider implements GitHubProvider {
     };
     if (process.env.GITHUB_TOKEN?.trim()) headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN.trim()}`;
 
-    const issue = (await fetchJson(this.fetchImpl, `${repoApi}/issues/${route.number}`, headers, timeoutMs)) as GitHubApiIssue;
-    const comments = (await fetchJson(this.fetchImpl, `${repoApi}/issues/${route.number}/comments?per_page=100`, headers, timeoutMs)) as unknown[];
+    const issue = (await fetchJson(this.fetchImpl, `${repoApi}/issues/${route.number}`, headers, timeoutMs, this.resolveHostname)) as GitHubApiIssue;
+    const comments = (await fetchJson(this.fetchImpl, `${repoApi}/issues/${route.number}/comments?per_page=100`, headers, timeoutMs, this.resolveHostname)) as unknown[];
 
     if (route.kind === "pull") {
       const [pr, reviews, files] = await Promise.all([
-        fetchJson(this.fetchImpl, `${repoApi}/pulls/${route.number}`, headers, timeoutMs) as Promise<GitHubApiPr>,
-        fetchJson(this.fetchImpl, `${repoApi}/pulls/${route.number}/reviews?per_page=100`, headers, timeoutMs) as Promise<unknown[]>,
-        fetchJson(this.fetchImpl, `${repoApi}/pulls/${route.number}/files?per_page=100`, headers, timeoutMs) as Promise<unknown[]>,
+        fetchJson(this.fetchImpl, `${repoApi}/pulls/${route.number}`, headers, timeoutMs, this.resolveHostname) as Promise<GitHubApiPr>,
+        fetchJson(this.fetchImpl, `${repoApi}/pulls/${route.number}/reviews?per_page=100`, headers, timeoutMs, this.resolveHostname) as Promise<unknown[]>,
+        fetchJson(this.fetchImpl, `${repoApi}/pulls/${route.number}/files?per_page=100`, headers, timeoutMs, this.resolveHostname) as Promise<unknown[]>,
       ]);
       const markdown = formatRestPrMarkdown(route, issue, pr, comments, reviews, files);
       return {
@@ -257,10 +262,12 @@ export async function cloneRepository(args: {
   ref?: string;
   target: string;
   execFileImpl?: ExecFileImpl;
+  resolveHostname?: ResolveHostname;
 }): Promise<void> {
   const execImpl = args.execFileImpl ?? defaultExecFile;
   const repoSlug = `${args.owner}/${args.repo}`;
   const ref = args.ref;
+  await assertPublicHttpUrl(`https://github.com/${repoSlug}`, args.resolveHostname);
 
   if (ref && isCommitSha(ref)) {
     await execImpl("git", ["clone", "--no-checkout", "--depth", "1", `https://github.com/${repoSlug}.git`, args.target], { timeout: 120_000 });
@@ -461,7 +468,14 @@ async function findReadmePreview(dirPath: string): Promise<string | null> {
     : `${text.slice(0, README_PREVIEW_CHARS)}\n\n[README preview capped at ${README_PREVIEW_CHARS} chars. Use read on ${path} for full content.]`;
 }
 
-async function fetchJson(fetchImpl: typeof fetch, url: string, headers: Record<string, string>, timeoutMs = 30_000): Promise<unknown> {
+async function fetchJson(
+  fetchImpl: typeof fetch,
+  url: string,
+  headers: Record<string, string>,
+  timeoutMs = 30_000,
+  resolveHostname?: ResolveHostname,
+): Promise<unknown> {
+  await assertPublicHttpUrl(url, resolveHostname);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 

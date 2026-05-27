@@ -6,6 +6,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { WebAccessCache } from "../src/cache.ts";
+import type { ResolveHostname } from "../src/utils/urls.ts";
 import {
   GitHubContentProvider,
   formatGhIssueMarkdown,
@@ -14,6 +15,8 @@ import {
   renderCodeRouteMarkdown,
   safeResolveInRepo,
 } from "../src/providers/github.ts";
+
+const publicResolver: ResolveHostname = async () => [{ address: "140.82.114.4", family: 4 }];
 
 test("githubClonePath sanitizes ref for local cache path", () => {
   const path = githubClonePath("/cache", "owner", "repo", "feature/one two");
@@ -90,6 +93,7 @@ test("GitHub REST issue fetch passes AbortSignal timeout to fetch", async () => 
       execFileImpl: async () => {
         throw new Error("gh unavailable in test");
       },
+      resolveHostname: publicResolver,
       fetchImpl: async (url, init) => {
         observedSignals.push(init?.signal);
         const body = String(url).includes("/comments")

@@ -9,7 +9,11 @@ import {
   isDirectFetchUrlCandidate,
   normalizeUrl,
   parseGitHubUrl,
+  type ResolveHostname,
+  assertPublicHttpUrl,
 } from "../src/utils/urls.ts";
+
+const publicResolver: ResolveHostname = async () => [{ address: "93.184.216.34", family: 4 }];
 
 test("GitHub URL parser classifies repo/blob/tree/issue/pull and rejects non-code pages", () => {
   assert.deepEqual(parseGitHubUrl("https://github.com/owner/repo"), {
@@ -57,6 +61,22 @@ test("normalizeUrl blocks private and localhost targets", () => {
   assert.equal(normalizeUrl("https://example.com/path#fragment"), "https://example.com/path");
 });
 
+test("assertPublicHttpUrl rejects hostnames that resolve to private addresses", async () => {
+  await assert.rejects(
+    () => assertPublicHttpUrl("https://example.com", async () => [{ address: "10.0.0.1", family: 4 }]),
+    /Blocked URL/,
+  );
+  await assert.rejects(
+    () => assertPublicHttpUrl("https://example.com", async () => [{ address: "fc00::1", family: 6 }]),
+    /Blocked URL/,
+  );
+  await assert.rejects(
+    () => assertPublicHttpUrl("https://example.com", async () => [{ address: "::ffff:127.0.0.1", family: 6 }]),
+    /Blocked URL/,
+  );
+  await assert.doesNotReject(() => assertPublicHttpUrl("https://example.com", publicResolver));
+});
+
 test("direct fetch eligibility is conservative", () => {
   assert.equal(isDirectFetchUrlCandidate("https://raw.githubusercontent.com/o/r/main/README.md"), true);
   assert.equal(isDirectFetchUrlCandidate("https://example.com/llms.txt"), true);
@@ -81,6 +101,7 @@ test("router chooses GitHub/direct/Firecrawl routes", () => {
 test("direct fetch returns static text in auto mode", async () => {
   const fetcher = new DirectHttpFetcher({
     now: () => new Date("2026-01-01T00:00:00.000Z"),
+    resolveHostname: publicResolver,
     fetchImpl: async () =>
       new Response("# Hello", {
         status: 200,
@@ -96,6 +117,7 @@ test("direct fetch returns static text in auto mode", async () => {
 
 test("direct fetch rejects responses above byte cap before reading", async () => {
   const fetcher = new DirectHttpFetcher({
+    resolveHostname: publicResolver,
     fetchImpl: async () =>
       new Response("small", {
         status: 200,
@@ -108,6 +130,7 @@ test("direct fetch rejects responses above byte cap before reading", async () =>
 
 test("direct fetch rejects streaming responses above byte cap", async () => {
   const fetcher = new DirectHttpFetcher({
+    resolveHostname: publicResolver,
     fetchImpl: async () =>
       new Response(
         new ReadableStream({
@@ -128,6 +151,7 @@ test("direct fetch rejects streaming responses above byte cap", async () => {
 
 test("direct fetch rejects HTML in auto mode without exposing raw HTML", async () => {
   const fetcher = new DirectHttpFetcher({
+    resolveHostname: publicResolver,
     fetchImpl: async () =>
       new Response("<html><body>messy</body></html>", {
         status: 200,

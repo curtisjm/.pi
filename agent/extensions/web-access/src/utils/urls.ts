@@ -1,3 +1,4 @@
+import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 
 import type { FetchMode, GitHubRoute } from "../types.ts";
@@ -10,6 +11,13 @@ export interface ParsedUrl {
   url: URL;
   normalizedUrl: string;
 }
+
+export interface ResolvedAddress {
+  address: string;
+  family?: number;
+}
+
+export type ResolveHostname = (hostname: string) => Promise<ResolvedAddress[]>;
 
 export interface GitHubRouteWithCandidates extends GitHubRoute {
   candidateSplits?: Array<{ ref: string; path?: string }>;
@@ -42,6 +50,15 @@ export function parseHttpUrl(input: string): ParsedUrl {
 
 export function normalizeUrl(input: string): string {
   return parseHttpUrl(input).normalizedUrl;
+}
+
+export async function assertPublicHttpUrl(input: string, resolveHostname: ResolveHostname = defaultResolveHostname): Promise<void> {
+  const { url } = parseHttpUrl(input);
+  await assertPublicHostname(url.hostname, resolveHostname);
+}
+
+export async function defaultResolveHostname(hostname: string): Promise<ResolvedAddress[]> {
+  return lookup(hostname.replace(/^\[|\]$/g, ""), { all: true, verbatim: true });
 }
 
 export function domainFromUrl(input: string): string {
@@ -243,43 +260,132 @@ export function validateFetchModeForUrl(fetchMode: FetchMode, url: string): void
   }
 }
 
-function isBlockedPrivateHost(rawHostname: string): boolean {
-  const hostname = rawHostname.toLowerCase().replace(/^\[|\]$/g, "");
-  if (hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".local")) return true;
+async function assertPublicHostname(rawHostname: string, resolveHostname: ResolveHostname): Promise<void> {
+  const hostname = normalizeHostname(rawHostname);
+  if (isBlockedPrivateHost(hostname)) throw new Error("Blocked URL: private or localhost address");
 
+  if (isIP(hostname) !== 0) return;
+
+  let addresses: ResolvedAddress[];
+  try {
+    addresses = await resolveHostname(hostname);
+  } catch {
+    throw new Error("Blocked URL: unable to resolve hostname safely");
+  }
+
+  if (addresses.length === 0) throw new Error("Blocked URL: unable to resolve hostname safely");
+  if (addresses.some((address) => isBlockedIpAddress(address.address))) {
+    throw new Error("Blocked URL: private or localhost address");
+  }
+}
+
+function isBlockedPrivateHost(rawHostname: string): boolean {
+  const hostname = normalizeHostname(rawHostname);
+  if (hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".local")) return true;
+  if (isBlockedIpAddress(hostname)) return true;
+
+  // Single-label names are internal-only in normal resolver configurations.
+  return isIP(hostname) === 0 && !hostname.includes(".");
+}
+
+function isBlockedIpAddress(ip: string): boolean {
+  const hostname = normalizeHostname(ip);
   const ipVersion = isIP(hostname);
   if (ipVersion === 4) return isBlockedIPv4(hostname);
   if (ipVersion === 6) return isBlockedIPv6(hostname);
-
-  // Single-label names are internal-only in normal resolver configurations.
-  return !hostname.includes(".");
+  return false;
 }
 
 function isBlockedIPv4(ip: string): boolean {
-  const parts = ip.split(".").map((part) => Number(part));
-  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return true;
-  const [a, b] = parts as [number, number, number, number];
+  const value = ipv4ToInt(ip);
+  if (value === null) return true;
   return (
-    a === 0 ||
-    a === 10 ||
-    a === 127 ||
-    (a === 169 && b === 254) ||
-    (a === 172 && b >= 16 && b <= 31) ||
-    (a === 192 && b === 168) ||
-    (a === 100 && b >= 64 && b <= 127)
+    ipv4InCidr(value, "0.0.0.0", 8) ||
+    ipv4InCidr(value, "10.0.0.0", 8) ||
+    ipv4InCidr(value, "127.0.0.0", 8) ||
+    ipv4InCidr(value, "169.254.0.0", 16) ||
+    ipv4InCidr(value, "172.16.0.0", 12) ||
+    ipv4InCidr(value, "192.168.0.0", 16) ||
+    ipv4InCidr(value, "100.64.0.0", 10)
   );
 }
 
 function isBlockedIPv6(ip: string): boolean {
-  const normalized = ip.toLowerCase();
+  const bytes = parseIPv6(ip);
+  if (!bytes) return true;
+  const mappedIPv4 = ipv4FromMappedIPv6(bytes);
+  if (mappedIPv4) return isBlockedIPv4(mappedIPv4);
+
   return (
-    normalized === "::1" ||
-    normalized === "::" ||
-    normalized.startsWith("fe80:") ||
-    normalized.startsWith("fc") ||
-    normalized.startsWith("fd") ||
-    normalized.startsWith("::ffff:127.") ||
-    normalized.startsWith("::ffff:10.") ||
-    normalized.startsWith("::ffff:192.168.")
+    bytes.every((byte) => byte === 0) ||
+    bytes.slice(0, 15).every((byte) => byte === 0) && bytes[15] === 1 ||
+    bytes[0] === 0xfe && (bytes[1]! & 0xc0) === 0x80 ||
+    (bytes[0]! & 0xfe) === 0xfc
   );
+}
+
+function normalizeHostname(hostname: string): string {
+  return hostname.toLowerCase().replace(/^\[|\]$/g, "");
+}
+
+function ipv4ToInt(ip: string): number | null {
+  const parts = ip.split(".").map((part) => Number(part));
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return null;
+  return (((parts[0]! << 24) >>> 0) + (parts[1]! << 16) + (parts[2]! << 8) + parts[3]!) >>> 0;
+}
+
+function ipv4InCidr(ip: number, base: string, prefixLength: number): boolean {
+  const baseValue = ipv4ToInt(base);
+  if (baseValue === null) return false;
+  const mask = prefixLength === 0 ? 0 : (0xffffffff << (32 - prefixLength)) >>> 0;
+  return (ip & mask) === (baseValue & mask);
+}
+
+function parseIPv6(ip: string): Uint8Array | null {
+  const zoneIndex = ip.indexOf("%");
+  const withoutZone = zoneIndex >= 0 ? ip.slice(0, zoneIndex) : ip;
+  const ipv4Match = withoutZone.match(/(.+:)(\d+\.\d+\.\d+\.\d+)$/);
+  let normalized = withoutZone;
+  let ipv4Bytes: number[] = [];
+
+  if (ipv4Match) {
+    const value = ipv4ToInt(ipv4Match[2]!);
+    if (value === null) return null;
+    ipv4Bytes = [(value >>> 24) & 0xff, (value >>> 16) & 0xff, (value >>> 8) & 0xff, value & 0xff];
+    normalized = `${ipv4Match[1]}${((value >>> 16) & 0xffff).toString(16)}:${(value & 0xffff).toString(16)}`;
+  }
+
+  const halves = normalized.split("::");
+  if (halves.length > 2) return null;
+  const left = halves[0] ? halves[0].split(":").filter(Boolean) : [];
+  const right = halves[1] ? halves[1].split(":").filter(Boolean) : [];
+  const missing = 8 - left.length - right.length;
+  if (missing < 0 || (halves.length === 1 && missing !== 0)) return null;
+
+  const words = [...left, ...Array<string>(missing).fill("0"), ...right];
+  if (words.length !== 8) return null;
+
+  const bytes = new Uint8Array(16);
+  for (const [index, word] of words.entries()) {
+    if (!/^[0-9a-f]{1,4}$/i.test(word)) return null;
+    const value = Number.parseInt(word, 16);
+    bytes[index * 2] = (value >>> 8) & 0xff;
+    bytes[index * 2 + 1] = value & 0xff;
+  }
+
+  // Preserve dotted IPv4 parsing semantics for mapped addresses.
+  if (ipv4Bytes.length === 4) {
+    bytes[12] = ipv4Bytes[0]!;
+    bytes[13] = ipv4Bytes[1]!;
+    bytes[14] = ipv4Bytes[2]!;
+    bytes[15] = ipv4Bytes[3]!;
+  }
+
+  return bytes;
+}
+
+function ipv4FromMappedIPv6(bytes: Uint8Array): string | null {
+  const isMapped = bytes.slice(0, 10).every((byte) => byte === 0) && bytes[10] === 0xff && bytes[11] === 0xff;
+  if (!isMapped) return null;
+  return `${bytes[12]}.${bytes[13]}.${bytes[14]}.${bytes[15]}`;
 }

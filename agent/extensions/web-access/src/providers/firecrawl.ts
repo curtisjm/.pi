@@ -4,7 +4,7 @@ import type { Document, ScrapeOptions } from "@mendable/firecrawl-js";
 import type { FetchOptions, PageContent, PageFetcher } from "../types.ts";
 import { MissingProviderKeyError } from "../utils/errors.ts";
 import { contentHash } from "../utils/hash.ts";
-import { domainFromUrl, normalizeUrl } from "../utils/urls.ts";
+import { assertPublicHttpUrl, domainFromUrl, normalizeUrl, type ResolveHostname } from "../utils/urls.ts";
 
 export interface FirecrawlClientLike {
   scrape(url: string, options?: ScrapeOptions): Promise<Document>;
@@ -13,22 +13,26 @@ export interface FirecrawlClientLike {
 export interface FirecrawlFetcherOptions {
   apiKey?: string;
   client?: FirecrawlClientLike;
+  resolveHostname?: ResolveHostname;
   now?: () => Date;
 }
 
 export class FirecrawlFetcher implements PageFetcher {
   private readonly apiKey?: string;
   private readonly injectedClient?: FirecrawlClientLike;
+  private readonly resolveHostname?: ResolveHostname;
   private readonly now: () => Date;
 
   constructor(options: FirecrawlFetcherOptions = {}) {
     this.apiKey = options.apiKey ?? process.env.FIRECRAWL_API_KEY;
     this.injectedClient = options.client;
+    this.resolveHostname = options.resolveHostname;
     this.now = options.now ?? (() => new Date());
   }
 
   async fetchPage(url: string, options: FetchOptions = {}): Promise<PageContent> {
     const normalizedUrl = normalizeUrl(url);
+    await assertPublicHttpUrl(normalizedUrl, this.resolveHostname);
     const client = this.getClient();
     const document = await client.scrape(normalizedUrl, {
       formats: ["markdown"],
