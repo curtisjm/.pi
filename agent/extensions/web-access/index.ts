@@ -68,6 +68,10 @@ export default function webAccessExtension(pi: ExtensionAPI) {
   pi.on("session_shutdown", () => {
     cache?.close();
     cache = undefined;
+    searchProvider = undefined;
+    router = undefined;
+    directFetcher = undefined;
+    firecrawlFetcher = undefined;
     githubProvider = undefined;
   });
 

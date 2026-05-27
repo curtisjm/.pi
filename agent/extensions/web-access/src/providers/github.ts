@@ -1,8 +1,8 @@
 import { execFile as execFileCallback } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { mkdir, readdir, readFile, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 
 import { DEFAULT_WEB_ACCESS_TTLS, WEB_ACCESS_CACHE_DB_PATH } from "../config.ts";
@@ -167,7 +167,7 @@ export class GitHubContentProvider implements GitHubProvider {
     }
 
     try {
-      return await this.fetchIssueOrPullViaRest(url, route);
+      return await this.fetchIssueOrPullViaRest(url, route, options.timeoutMs ?? 30_000);
     } catch (error) {
       attempts.push(`GitHub REST: ${conciseError(error)}`);
     }
@@ -206,7 +206,7 @@ export class GitHubContentProvider implements GitHubProvider {
     };
   }
 
-  private async fetchIssueOrPullViaRest(url: string, route: GitHubRoute): Promise<PageContent> {
+  private async fetchIssueOrPullViaRest(url: string, route: GitHubRoute, timeoutMs: number): Promise<PageContent> {
     const repoApi = `https://api.github.com/repos/${route.owner}/${route.repo}`;
     const headers: Record<string, string> = {
       Accept: "application/vnd.github+json",
@@ -215,14 +215,14 @@ export class GitHubContentProvider implements GitHubProvider {
     };
     if (process.env.GITHUB_TOKEN?.trim()) headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN.trim()}`;
 
-    const issue = (await fetchJson(this.fetchImpl, `${repoApi}/issues/${route.number}`, headers)) as GitHubApiIssue;
-    const comments = (await fetchJson(this.fetchImpl, `${repoApi}/issues/${route.number}/comments?per_page=100`, headers)) as unknown[];
+    const issue = (await fetchJson(this.fetchImpl, `${repoApi}/issues/${route.number}`, headers, timeoutMs)) as GitHubApiIssue;
+    const comments = (await fetchJson(this.fetchImpl, `${repoApi}/issues/${route.number}/comments?per_page=100`, headers, timeoutMs)) as unknown[];
 
     if (route.kind === "pull") {
       const [pr, reviews, files] = await Promise.all([
-        fetchJson(this.fetchImpl, `${repoApi}/pulls/${route.number}`, headers) as Promise<GitHubApiPr>,
-        fetchJson(this.fetchImpl, `${repoApi}/pulls/${route.number}/reviews?per_page=100`, headers) as Promise<unknown[]>,
-        fetchJson(this.fetchImpl, `${repoApi}/pulls/${route.number}/files?per_page=100`, headers) as Promise<unknown[]>,
+        fetchJson(this.fetchImpl, `${repoApi}/pulls/${route.number}`, headers, timeoutMs) as Promise<GitHubApiPr>,
+        fetchJson(this.fetchImpl, `${repoApi}/pulls/${route.number}/reviews?per_page=100`, headers, timeoutMs) as Promise<unknown[]>,
+        fetchJson(this.fetchImpl, `${repoApi}/pulls/${route.number}/files?per_page=100`, headers, timeoutMs) as Promise<unknown[]>,
       ]);
       const markdown = formatRestPrMarkdown(route, issue, pr, comments, reviews, files);
       return {
@@ -350,10 +350,17 @@ export function safeResolveInRepo(localRepoPath: string, repoRelativePath: strin
   const base = resolve(localRepoPath);
   const target = resolve(base, repoRelativePath);
   const rel = relative(base, target);
-  if (rel.startsWith("..") || rel === "" && repoRelativePath.includes("..") || resolve(target) === base && repoRelativePath === "..") {
+  if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
     throw new Error("Refusing to read outside cloned repository");
   }
-  return target;
+
+  const baseReal = realpathSync(base);
+  const targetReal = realpathSync(target);
+  if (targetReal !== baseReal && !targetReal.startsWith(`${baseReal}${sep}`)) {
+    throw new Error("Refusing to read outside cloned repository");
+  }
+
+  return targetReal;
 }
 
 export function formatGhIssueMarkdown(route: GitHubRoute, issue: Record<string, unknown>): string {
@@ -454,10 +461,17 @@ async function findReadmePreview(dirPath: string): Promise<string | null> {
     : `${text.slice(0, README_PREVIEW_CHARS)}\n\n[README preview capped at ${README_PREVIEW_CHARS} chars. Use read on ${path} for full content.]`;
 }
 
-async function fetchJson(fetchImpl: typeof fetch, url: string, headers: Record<string, string>): Promise<unknown> {
-  const response = await fetchImpl(url, { headers });
-  if (!response.ok) throw new Error(`GitHub REST failed with ${response.status} ${response.statusText}`.trim());
-  return response.json();
+async function fetchJson(fetchImpl: typeof fetch, url: string, headers: Record<string, string>, timeoutMs = 30_000): Promise<unknown> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetchImpl(url, { headers, signal: controller.signal });
+    if (!response.ok) throw new Error(`GitHub REST failed with ${response.status} ${response.statusText}`.trim());
+    return response.json();
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function formatIssueMarkdown(args: {

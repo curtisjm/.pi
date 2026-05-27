@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
+import { WebAccessCache } from "../src/cache.ts";
 import {
+  GitHubContentProvider,
   formatGhIssueMarkdown,
   formatGhPrMarkdown,
   githubClonePath,
@@ -18,10 +20,22 @@ test("githubClonePath sanitizes ref for local cache path", () => {
   assert.equal(path, join("/cache", "owner", "repo@feature_one_two"));
 });
 
-test("safeResolveInRepo prevents path traversal", () => {
-  const root = "/tmp/repo";
-  assert.equal(safeResolveInRepo(root, "src/index.ts"), join(root, "src/index.ts"));
-  assert.throws(() => safeResolveInRepo(root, "../secret"), /outside cloned repository/);
+test("safeResolveInRepo prevents lexical and symlink path traversal", async () => {
+  const parent = await mkdtemp(join(tmpdir(), "web-access-github-safe-"));
+  const root = join(parent, "repo");
+  const outside = join(parent, "outside.txt");
+  try {
+    mkdirSync(join(root, "src"), { recursive: true });
+    writeFileSync(join(root, "src", "index.ts"), "export const x = 1;");
+    writeFileSync(outside, "secret");
+    symlinkSync(outside, join(root, "src", "outside-link"));
+
+    assert.equal(safeResolveInRepo(root, "src/index.ts"), realpathSync(join(root, "src", "index.ts")));
+    assert.throws(() => safeResolveInRepo(root, "../outside.txt"), /outside cloned repository/);
+    assert.throws(() => safeResolveInRepo(root, "src/outside-link"), /outside cloned repository/);
+  } finally {
+    rmSync(parent, { recursive: true, force: true });
+  }
 });
 
 test("formatGhIssueMarkdown caps discussion and includes metadata", () => {
@@ -64,6 +78,38 @@ test("formatGhPrMarkdown includes changed-file summaries without diffs", () => {
   assert.match(markdown, /src\/index.ts/);
   assert.doesNotMatch(markdown, /SHOULD NOT APPEAR/);
   assert.match(markdown, /reviewer/);
+});
+
+test("GitHub REST issue fetch passes AbortSignal timeout to fetch", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "web-access-github-rest-"));
+  const cache = new WebAccessCache({ dbPath: join(dir, "cache.sqlite") });
+  const observedSignals: Array<AbortSignal | null | undefined> = [];
+  try {
+    const provider = new GitHubContentProvider({
+      cache,
+      execFileImpl: async () => {
+        throw new Error("gh unavailable in test");
+      },
+      fetchImpl: async (url, init) => {
+        observedSignals.push(init?.signal);
+        const body = String(url).includes("/comments")
+          ? []
+          : { title: "Issue", state: "open", user: { login: "curtis" }, labels: [], body: "Body" };
+        return new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      },
+    });
+
+    const page = await provider.fetchGitHub("https://github.com/o/r/issues/1", { timeoutMs: 123 });
+    assert.equal(page.source, "github-api");
+    assert.equal(observedSignals.length, 2);
+    assert.equal(observedSignals.every((signal) => signal instanceof AbortSignal), true);
+  } finally {
+    cache.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("renderCodeRouteMarkdown lists repo tree and README preview", async () => {

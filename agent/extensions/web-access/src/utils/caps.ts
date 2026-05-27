@@ -34,7 +34,7 @@ export function formatCapDisclosure(args: {
   const selector = args.selector ? `, ${args.selector}` : "";
   const nextOffset = args.capped.end;
   const lines = [
-    `[Content capped: showing chars ${args.capped.offset}-${args.capped.end} of ${args.capped.fullLength}.]`,
+    `[Content capped: showing chars [${args.capped.offset}, ${args.capped.end}) of ${args.capped.fullLength}.]`,
     `Full content is stored as responseId "${args.responseId}".`,
   ];
 

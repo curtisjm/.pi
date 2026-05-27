@@ -9,6 +9,8 @@ import {
 } from "../utils/urls.ts";
 import { DirectFetchRejectedError } from "../utils/errors.ts";
 
+export const DIRECT_HTTP_MAX_BYTES = 2 * 1024 * 1024;
+
 export interface DirectHttpFetcherOptions {
   fetchImpl?: typeof fetch;
   now?: () => Date;
@@ -49,7 +51,7 @@ export class DirectHttpFetcher {
         throw new DirectFetchRejectedError("Direct fetch skipped because the URL/content-type is not agent-friendly");
       }
 
-      const text = await response.text();
+      const text = await readResponseTextWithByteLimit(response);
       if (autoMode && (isLikelyHtml(text) || contentType?.toLowerCase().includes("text/html"))) {
         // Do not expose or cache messy direct HTML in auto mode. The router will
         // fall back to Firecrawl for clean markdown.
@@ -74,6 +76,50 @@ export class DirectHttpFetcher {
       clearTimeout(timeout);
     }
   }
+}
+
+async function readResponseTextWithByteLimit(response: Response, maxBytes = DIRECT_HTTP_MAX_BYTES): Promise<string> {
+  const contentLengthHeader = response.headers.get("content-length");
+  if (contentLengthHeader) {
+    const contentLength = Number(contentLengthHeader);
+    if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+      throw new Error(`Direct HTTP response exceeded ${maxBytes} byte limit before read.`);
+    }
+  }
+
+  if (!response.body) {
+    const buffer = await response.arrayBuffer();
+    if (buffer.byteLength > maxBytes) throw new Error(`Direct HTTP response exceeded ${maxBytes} byte limit.`);
+    return new TextDecoder().decode(buffer);
+  }
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let byteLength = 0;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      byteLength += value.byteLength;
+      if (byteLength > maxBytes) {
+        await reader.cancel();
+        throw new Error(`Direct HTTP response exceeded ${maxBytes} byte limit.`);
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = new Uint8Array(byteLength);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(bytes);
 }
 
 function formatDirectContent(text: string, contentType: string | null, url: string): string {

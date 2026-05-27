@@ -29,12 +29,13 @@ export class ExaSearchProvider implements SearchProvider {
   async search(query: string, options: SearchOptions = {}): Promise<SearchResponse> {
     const client = this.getClient();
     const kind = options.kind ?? "web";
-    const exaOptions = buildExaSearchOptions(query, options);
+    const now = this.now();
+    const exaOptions = buildExaSearchOptions(query, options, now);
     const raw = await client.search(kind === "code" ? shapeCodeQuery(query) : query, exaOptions);
     return normalizeExaSearchResponse(raw, {
       query,
       kind,
-      searchedAt: this.now().toISOString(),
+      searchedAt: now.toISOString(),
       maxCharacters: options.maxCharacters,
     });
   }
@@ -46,14 +47,14 @@ export class ExaSearchProvider implements SearchProvider {
   }
 }
 
-export function buildExaSearchOptions(query: string, options: SearchOptions = {}): RegularSearchOptions {
+export function buildExaSearchOptions(query: string, options: SearchOptions = {}, now: Date = new Date()): RegularSearchOptions {
   const kind = options.kind ?? "web";
   const base: RegularSearchOptions = {
     type: "auto",
     numResults: Math.max(1, Math.min(10, options.maxResults ?? (kind === "code" ? 8 : 5))),
     includeDomains: options.includeDomains,
     excludeDomains: options.excludeDomains,
-    startPublishedDate: recencyToStartPublishedDate(options.recency),
+    startPublishedDate: recencyToStartPublishedDate(options.recency, now),
     contents:
       kind === "code"
         ? {
@@ -120,9 +121,8 @@ function shapeCodeQuery(query: string): string {
   return `${query}\n\nPrefer official docs, API references, source code, examples, GitHub issues, changelogs, and concrete implementation details.`;
 }
 
-function recencyToStartPublishedDate(recency: SearchOptions["recency"]): string | undefined {
+function recencyToStartPublishedDate(recency: SearchOptions["recency"], now: Date): string | undefined {
   if (!recency) return undefined;
-  const now = new Date();
   const days = recency === "day" ? 1 : recency === "week" ? 7 : recency === "month" ? 31 : 365;
   return new Date(now.getTime() - days * 24 * 60 * 60 * 1_000).toISOString();
 }

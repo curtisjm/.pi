@@ -3,6 +3,9 @@
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=22.5.0"
+  },
   "dependencies": {
     "@mendable/firecrawl-js": "^4.25.0",
     "dotenv": "^16.4.7",

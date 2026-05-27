@@ -2,9 +2,9 @@
 
 ## Status
 
-Candidate implementation plan. No code has been written from this spec yet.
+Original candidate implementation plan. The implementation has since been completed in this PR stack.
 
-This document is intended to be sufficient context for a fresh Pi agent session to implement the extension. After this spec is reviewed and accepted, promote the durable decisions into:
+This document was intended to be sufficient context for a fresh Pi agent session to implement the extension. After this spec was reviewed and accepted, the durable decisions were promoted into:
 
 ```text
 docs/decisions/0003-add-focused-web-access-extension.md

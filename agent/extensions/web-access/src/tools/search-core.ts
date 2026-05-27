@@ -65,10 +65,14 @@ export function normalizeQueries(params: Pick<WebSearchParams, "query" | "querie
 function normalizedSearchCacheOptions(options: SearchOptions): Record<string, unknown> {
   return {
     maxResults: options.maxResults,
-    includeDomains: options.includeDomains,
-    excludeDomains: options.excludeDomains,
+    includeDomains: normalizeDomainList(options.includeDomains),
+    excludeDomains: normalizeDomainList(options.excludeDomains),
     recency: options.recency,
     kind: options.kind,
     maxCharacters: options.maxCharacters,
   };
+}
+
+function normalizeDomainList(domains: string[] | undefined): string[] {
+  return [...new Set((domains ?? []).map((domain) => domain.trim().toLowerCase()).filter(Boolean))].sort();
 }

@@ -1,3 +1,5 @@
+import { isIP } from "node:net";
+
 import type { FetchMode, GitHubRoute } from "../types.ts";
 
 const GITHUB_HOSTS = new Set(["github.com", "www.github.com"]);
@@ -23,6 +25,10 @@ export function parseHttpUrl(input: string): ParsedUrl {
 
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new Error(`Unsupported URL protocol: ${url.protocol}`);
+  }
+
+  if (isBlockedPrivateHost(url.hostname)) {
+    throw new Error("Blocked URL: private or localhost address");
   }
 
   url.hash = "";
@@ -235,4 +241,45 @@ export function validateFetchModeForUrl(fetchMode: FetchMode, url: string): void
   if (fetchMode === "github" && !parseGitHubUrl(url)) {
     throw new Error(`fetchMode "github" only supports GitHub repo/blob/tree/issue/pull URLs: ${url}`);
   }
+}
+
+function isBlockedPrivateHost(rawHostname: string): boolean {
+  const hostname = rawHostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".local")) return true;
+
+  const ipVersion = isIP(hostname);
+  if (ipVersion === 4) return isBlockedIPv4(hostname);
+  if (ipVersion === 6) return isBlockedIPv6(hostname);
+
+  // Single-label names are internal-only in normal resolver configurations.
+  return !hostname.includes(".");
+}
+
+function isBlockedIPv4(ip: string): boolean {
+  const parts = ip.split(".").map((part) => Number(part));
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return true;
+  const [a, b] = parts as [number, number, number, number];
+  return (
+    a === 0 ||
+    a === 10 ||
+    a === 127 ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    (a === 100 && b >= 64 && b <= 127)
+  );
+}
+
+function isBlockedIPv6(ip: string): boolean {
+  const normalized = ip.toLowerCase();
+  return (
+    normalized === "::1" ||
+    normalized === "::" ||
+    normalized.startsWith("fe80:") ||
+    normalized.startsWith("fc") ||
+    normalized.startsWith("fd") ||
+    normalized.startsWith("::ffff:127.") ||
+    normalized.startsWith("::ffff:10.") ||
+    normalized.startsWith("::ffff:192.168.")
+  );
 }

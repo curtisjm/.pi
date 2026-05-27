@@ -290,7 +290,8 @@ export function ttlToExpiresAt(ttlHours: number | null, now: Date = new Date()):
 export function isExpired(expiresAt: unknown, now: Date = new Date()): boolean {
   if (expiresAt === null || expiresAt === undefined || expiresAt === "") return false;
   const time = Date.parse(String(expiresAt));
-  return Number.isFinite(time) && time <= now.getTime();
+  if (!Number.isFinite(time)) return true;
+  return time <= now.getTime();
 }
 
 function rowToClone(row: DbRow): GitHubCloneRecord {

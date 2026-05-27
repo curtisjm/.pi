@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { DirectHttpFetcher } from "../src/providers/direct-http.ts";
+import { DirectHttpFetcher, DIRECT_HTTP_MAX_BYTES } from "../src/providers/direct-http.ts";
 import { WebRouter } from "../src/router.ts";
 import { DirectFetchRejectedError } from "../src/utils/errors.ts";
 import {
   isDirectFetchContentType,
   isDirectFetchUrlCandidate,
+  normalizeUrl,
   parseGitHubUrl,
 } from "../src/utils/urls.ts";
 
@@ -46,6 +47,16 @@ test("GitHub URL parser classifies repo/blob/tree/issue/pull and rejects non-cod
   assert.equal(parseGitHubUrl("https://github.com/owner/repo/blob/main/../secret"), null);
 });
 
+test("normalizeUrl blocks private and localhost targets", () => {
+  assert.throws(() => normalizeUrl("http://localhost/"), /Blocked URL/);
+  assert.throws(() => normalizeUrl("http://service.local/"), /Blocked URL/);
+  assert.throws(() => normalizeUrl("http://intranet/"), /Blocked URL/);
+  assert.throws(() => normalizeUrl("http://127.0.0.1/"), /Blocked URL/);
+  assert.throws(() => normalizeUrl("http://10.0.0.5/"), /Blocked URL/);
+  assert.throws(() => normalizeUrl("http://[::1]/"), /Blocked URL/);
+  assert.equal(normalizeUrl("https://example.com/path#fragment"), "https://example.com/path");
+});
+
 test("direct fetch eligibility is conservative", () => {
   assert.equal(isDirectFetchUrlCandidate("https://raw.githubusercontent.com/o/r/main/README.md"), true);
   assert.equal(isDirectFetchUrlCandidate("https://example.com/llms.txt"), true);
@@ -81,6 +92,38 @@ test("direct fetch returns static text in auto mode", async () => {
   assert.equal(page.source, "direct-http");
   assert.equal(page.markdown, "# Hello");
   assert.equal(page.title, "llms.txt");
+});
+
+test("direct fetch rejects responses above byte cap before reading", async () => {
+  const fetcher = new DirectHttpFetcher({
+    fetchImpl: async () =>
+      new Response("small", {
+        status: 200,
+        headers: { "content-type": "text/plain", "content-length": String(DIRECT_HTTP_MAX_BYTES + 1) },
+      }),
+  });
+
+  await assert.rejects(() => fetcher.fetchPage("https://example.com/large.txt", { fetchMode: "auto" }), /byte limit/);
+});
+
+test("direct fetch rejects streaming responses above byte cap", async () => {
+  const fetcher = new DirectHttpFetcher({
+    fetchImpl: async () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new Uint8Array(DIRECT_HTTP_MAX_BYTES + 1));
+            controller.close();
+          },
+        }),
+        {
+          status: 200,
+          headers: { "content-type": "text/plain" },
+        },
+      ),
+  });
+
+  await assert.rejects(() => fetcher.fetchPage("https://example.com/large.txt", { fetchMode: "auto" }), /byte limit/);
 });
 
 test("direct fetch rejects HTML in auto mode without exposing raw HTML", async () => {
