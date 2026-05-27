@@ -4,6 +4,7 @@ agent/**/*.local.*
 agent/*.local.*
 .env
 .env.*
+!agent/.env.example
 *.pem
 *.key
 

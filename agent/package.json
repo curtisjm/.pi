@@ -1,0 +1,32 @@
+{
+  "name": "pi-agent-config",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "dependencies": {
+    "@mendable/firecrawl-js": "^4.25.0",
+    "dotenv": "^16.4.7",
+    "exa-js": "^2.13.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "0.75.5",
+    "@earendil-works/pi-coding-agent": "0.75.5",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.0.0",
+    "typebox": "1.1.38",
+    "typescript": "^5.0.0"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "scripts": {
+    "test": "node --test --import tsx ./extensions/web-access/test/**/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  }
+}
